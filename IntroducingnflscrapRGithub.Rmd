@@ -1,0 +1,510 @@
+---
+title: "Introducing nflscrapR Package"
+author: "Maksim Horowitz"
+date: "March 2, 2016"
+output: pdf_document
+---
+
+# A Package Built for Data Enthused NFL Fans
+
+By: Maksim Horowitz (@bklynmaks)
+
+## Introducing nflscrapR 
+
+While searching the web for a viable source of NFL data for exploration and analysis, I noticed that there was no such source readily available for my desired insights.  After browsing through my go-to websites (such as football-reference and ESPN) I realized that none of that data could be used to extract the meaningful insights that many data-enthused and statistically inclined football analysts and fans were hungry for.  
+
+After discussing this issue with a number of my peers, I discovered an API maintained by NFL.com that has player, drive, and play-by-play information across whole seasons.  If you're thinking "too good to be true", then you're right. The data is stored in a JSON format and it's messier than you could even imagine! So let the data wrangling begin right?  Wrong, we have already done it for you.
+
+NFL fans and sports enthusiastic alike, I would like to introduce the `nflscrapR` package, an American football data aggregator that will scrape, clean, and parse play-by-play data across games, seasons, and careers.
+
+The package includes **detailed** and **clean** football datasets for immediate use in football analytics and developing insights in the NFL (similar to what we see in the MLB, NBA, and NHL).  This package was created to allow for open-source development, standardized data usage, and reproducible football analytics research, something that teams need and fans crave.
+
+## Functionality of nflscrapR
+
+There are 11 functions stored in the `nflscrapR` package: nine produce dataframes primed for analysis and two are helper functions used in scraping. Probably the two most interesting functions in the package are the play-by-play parsing functions and the player-game functions.
+
+* ```game_play_by_play``` is a function that scrapes and parses play-by-play data from a specified game.  Each game has a unique gameID, which is used as an input for this function and spits out a 61-column dataframe with detailed information on each play.
+    + The ```season_play_by_play``` function outputs the same dataframe, but aggregated over an entire season.  You simply input the year associated with a given NFL season and within minutes you have a detailed dataset of every play in your desired season.
+* ```playergame``` allows a user to gather all the measurable statistics of each player involved in a given game.  Yes, that means this function will tell you about Peyton Manning's kick return habits and Marshawn Lynch's passing tendencies. Simply input the gameID associated with your game of choice and the dataset is created (there is a function in the package that helps you find game IDs!)
+    + ```season_playergame``` generates the same dataset as ```playergame``` except across the entire season.  So all players in all 256 games across a season will have one row for their statistics for each game (i.e. if Joe Flacco records a pass in all 16 games, then he will have 16 rows in this dataset).
+    + ```agg_playergame``` generates a dataset with season total statistics.  It uses ```season_playergame``` and aggregates statistics over the entire season returning one row for each player per season.
+
+```{r, include = FALSE, eval=FALSE}
+
+# Setting WD
+
+setwd("~/Documents/Tartan Analytics/Articles/Introducing nflscrapR")
+
+# Dowloading Play-By-Play Data
+
+pbp2009 <- season_play_by_play(2009)
+Sys.sleep(sample(30:300, replace = TRUE))
+pbp2010 <- season_play_by_play(2010)
+Sys.sleep(sample(30:300, replace = TRUE))
+pbp2011 <- season_play_by_play(2011)
+Sys.sleep(sample(30:300, replace = TRUE))
+pbp2012 <- season_play_by_play(2012)
+Sys.sleep(sample(30:300, replace = TRUE))
+#pbp2013 <- season_play_by_play(2013)
+  # Game with Error: 2013092206
+pbp2014 <- season_play_by_play(2014)
+Sys.sleep(sample(30:300, replace = TRUE))
+pbp2015 <- season_play_by_play(2015)
+
+
+# Play-by-play from 2013 minus the problematic game
+gameids2013 <- extracting_gameids(2013)
+
+games2013minus1 <- lapply(gameids2013[-which(gameids2013 == "2013092206")],
+                          game_play_by_play)
+
+pbp2013.minusonegame <- do.call(rbind, games2013minus1)
+
+# Saving Data
+save(pbp2009, file = "pbp2009.RData")
+save(pbp2010, file = "pbp2010.RData")
+save(pbp2011, file = "pbp2011.RData")
+save(pbp2012, file = "pbp2012.RData")
+save(pbp2013.minusonegame, file = "pbp2013m1.RData")
+save(pbp2014, file = "pbp2014.RData")
+save(pbp2015, file = "pbp2015.RData")
+```
+
+## Example Usage of nflscrapR
+
+Below are a few examples of how one can use `nflscrapR` to do your own NFL research.  Before we get going, here are a few things to note:
+
+* The data only goes back to 2009 
+* This is a preliminary version of the software, so please let us know if you identify any issues
+* I am only using regular season data, but you can easily use playoff data if desired
+
+```{r}
+# Loading necessary libraries
+suppressMessages(library(ggplot2))
+suppressMessages(library(nflscrapR))
+suppressMessages(library(dplyr))
+suppressMessages(library(gridExtra))
+suppressMessages(library(mclust))
+suppressMessages(library(knitr))
+```
+
+```{r, results= "hide", echo = FALSE}
+# Loading the Data
+load("pbp2009.RData")
+load("pbp2010.RData")
+load("pbp2011.RData")
+load("pbp2012.RData")
+load("pbp2013m1.RData")
+load("pbp2014.RData")
+load("pbp2015.RData")
+
+# Combining all the Data
+total.dat <- rbind(pbp2009, pbp2010, pbp2011, pbp2012, pbp2013.minusonegame,
+                   pbp2014, pbp2015)
+
+# What variables are in the DF?
+colnames(total.dat)
+```
+
+### Data Visualization and Model Building with ```nflscrapR```
+
+An interesting concept in football is the idea of "clutchness" or whether or not a player performed well in a high-pressure situation.  Many believed that Tim Tebow had it and yet he fizzled out of the NFL after only three seasons.  We see this attribute for players in the Madden NFL video games, but how is it actually calculated?  When does "clutch time" begin?  How do we know if a player is clutch or not?  These are questions that need answering, and I have taken a stab at answering them.
+
+In this example, I will attempt to define and group "clutchness" for quarterbacks.  I chose to define a clutch situation as any play in the fourth quarter that occurs with less than 5 minutes remaining with a one score point differential or less.  Additionally, within the clutch time subset, I eliminated all quarterbacks with fewer than 20 attempts.  Using a number of different summary statistics, I examined which quarterbacks performed best when the game was on the line, and then created groups for clutch quarterback play.
+
+First, I took a look at completion percentage in clutch time situations.  Examining the graph you can see that the usual suspects are up there. Roesthlisberger is believed to be "clutch" around the league and across numerous news sources.  We see a number of elite quarterbacks such as Brees, Luck, and Palmer who are generally thought of as clutch.  However, it is curious to  see that players such as Winston, Davis, Webb, and Bridgewater have such high clutch time completion percentages.  This is a product of their small sample sizes, as Winston just made the cut off for qualifying quarterbacks with 21 clutch time passes last season (the Bucs had a lot of close games), and the same can be said for many of the other young quarterbacks.  Maybe one of the most striking players on the graph is Tony Romo.  He was believed to be one of the most unclutch quarterbacks of all time ever since [his fumbled extra point in the 2006 Wildcard Round](https://www.youtube.com/watch?v=QVuQ5aw0HAQ).  In any case, it's clear that completion percentage is not the be all end all measurement of clutch quarterback play.  So, I took a look at a few more statistics.
+
+```{r, fig.height= 5, fig.width= 7.35, echo = FALSE}
+### QB Clutch Passing Situations
+
+# Defining clutch situation when less than 5:00 left and one score diff
+clutch.qbs <- subset(total.dat, TimeSecs <= 300 & AbsScoreDiff <= 8)
+
+# Grouping by each QB
+clutch.passes <- clutch.qbs %>% group_by(Passer) 
+
+# How many completions?
+clutch.passes <- clutch.passes %>% summarise(
+               completions= length(which(PassOutcome == "Complete")), 
+               pass.attempts = sum(PassAttempt))
+
+# Adding Comp.Perc
+clutch.passes$comp.perc <- round(clutch.passes$completions/
+                                   clutch.passes$pass.attempts, 3)
+
+# Making sure they had a large enough sample of attempts
+clutch.passes.qual <- subset(clutch.passes, pass.attempts > 20)
+
+# Order by Completetion %
+clutch.passes <- clutch.passes.qual[order(clutch.passes.qual$comp.perc,
+                    decreasing = TRUE),]
+
+clutch.passes[nrow(clutch.passes)+1,"Passer"] <- "League Average"
+clutch.passes[which(clutch.passes$Passer == "League Average"),
+              "completions"] <- mean(clutch.passes$completions, na.rm = TRUE)
+clutch.passes[which(clutch.passes$Passer == "League Average")
+              ,"pass.attempts"] <- mean(clutch.passes$pass.attempts, na.rm = TRUE)
+clutch.passes[which(clutch.passes$Passer == "League Average"),
+              "comp.perc"] <- round(mean(clutch.passes$comp.perc, na.rm = TRUE),3)
+
+
+# Plotting top 15 clutch QBs over past 6 years by compl %
+clutch.qb.comperc <- ggplot(clutch.passes[c(1:15, nrow(clutch.passes)),], 
+                            aes(x = reorder(Passer,                                                                        comp.perc), y = comp.perc)) +
+  geom_bar(stat = "identity", color = "navy", fill = c("red", rep("deepskyblue",15)), 
+           alpha = .7,
+           show.legend = FALSE) + 
+  theme(axis.text.y = element_text(size = 13)) +
+  ggtitle("Clutch Time Completion Percentage (2009-2015)") + coord_flip() +
+  ylab("Completion Percentage (%)") + xlab("Passer") + 
+  geom_text(aes(label = paste(comp.perc*100, "%", sep = "")), 
+                  nudge_y = .037) +
+  scale_y_continuous(breaks = c(0, .2, .4, .6), labels = paste(seq(from = 0, to = 60, by = 20), "%",sep = ""))
+
+clutch.qb.comperc
+```
+
+
+Examining scoring was my next step.  To find total points, I counted the number of clutch touchdowns each quarterback threw then multiplied by 7 (in expectation, touchdown are worth almost exactly 7 points). I then calculated points per attempt so that players were not rewarded or penalized for playing in more or fewer clutch time snaps.  What I observed for both total points and points per attempt was similar to that of completion percentage.  Points per attempt allows us to see how often the quarterbacks in our dataset find the endzone in clutch moments.  We see that elite quarterbacks and veteran quarterback are the minority in the top 15 quarterbacks by points per attempt.  A few reasons could be as follows:
+
+1. Quarterbacks who have played long have more attempts and thus their point per attempt value is diluted.
+2. Elite quarterbacks often find themselves in "clutch situation" less often in the regular season due to their dominance.  This could potentially be a sample size issue where elite quarterbacks have less opportunity to make plays in the clutch.  Alternatively, when elite quarterbacks are in clutch situations they are often relied upon much more heavily than an average or young quarterback, which could lead to an inflation in the number of total passes and the number of poor passes resulting in incompletions.
+3. Our points formula only accounts for touchdowns that the quarterbacks throws or runs.  This means that if a quarterback drives their team down to the 1 yard line and the tailback scores the touchdown then we do not credit the QB with generating any points (something to improve on in the future!)
+4. Our points formula also did not account for field goals kicked at the end of a drive
+
+Even given the four potential sources of error listed above, it is interesting to see that mobile quarterbacks tend to have a higher points per attempt value.  This could be because mobile quarterbacks are a threat to make plays on the run and through the air.
+
+Now let's take a look at total points.  What you see is something a bit more expected.  The younger quarterbacks have disappeared and many of the "elite" quarterbacks are listed (not you Ryan Fitzpatrick). As I mentioned above, the data I am using only goes back to 2009, so players like Tom Brady and Peyton Manning who would be at the top of this list are found a few notches down or not at all.  
+
+These statistics give us another take on defining what clutch quarterback play looks like. There are five players found on both lists: Stafford, Palmer, Rodgers, Orton, and Luck.  Three of these players are regarded as franchise quarterbacks.  Without much thought, both of Rodgers' hailmary tosses this year were timely plays (yet highly improbable) but those aside, it is generally agreed upon that Rodgers is a top three quarterback in the league, in part because of his performance in clutch time. Andrew Luck's appearance here also makes sense.  He played incredible in the 2013-2014 Wildcard round, leading an improbable comeback against the Chiefs. Then, in 2014-2015, he led the Colts to the AFC Championship game.  On his career, Luck has 10 fourth quarter comebacks and 14 game-winning drives. The man has the ability to summon his best play when his team needs him most.  Palmer and Stafford are both guns slingers who can get the job done when their teams are in need (for the most part).  Orton was the curious case for me, but after looking into his come-from-behind win statistics it began to make sense.  Orton has eight come from behind wins (six of which were after 2009) and has manufactured nine game-winning drives.
+
+```{r, echo = FALSE, results = "hide"}
+clutch.passes <- clutch.passes[-which(clutch.passes$Passer == "League Average"),]
+```
+
+```{r, fig.height= 8, fig.width= 8, echo = FALSE}
+## More Clutch QB Stats: Total Points, Yards Per Attempt ##
+
+# QB passing TDs
+clutch.pts <- clutch.qbs %>% group_by(Passer) %>% summarise(
+               touchdown.count = length(which(Touchdown == 1)), 
+               pass.attempts = sum(PassAttempt))
+
+clutch.pts <- subset(clutch.pts, pass.attempts > 20 & !is.na(Passer))
+
+
+# QB Rushing TDs
+clutch.qb.runs <- clutch.qbs %>% group_by(Rusher) %>% summarise(
+               rushTD.count = length(which(Touchdown == 1)), 
+               rush.attempts = sum(RushAttempt))
+
+# Merging Datasets
+
+clutch.qb.pts <- merge(clutch.pts, clutch.qb.runs, by.x = "Passer",
+                       by.y = "Rusher", all.x = TRUE)
+
+clutch.qb.pts$rushTD.count <- ifelse(is.na(clutch.qb.pts$rushTD.count), 0,
+                                     clutch.qb.pts$rushTD.count)
+
+# Total TD Column
+clutch.qb.pts$total.tds <- clutch.qb.pts$touchdown.count + clutch.qb.pts$rushTD.count
+
+
+# Calculating total points and points per att
+clutch.qb.pts$total.pts <- clutch.qb.pts$total.tds*7
+clutch.qb.pts$pts.att <- round(clutch.qb.pts$total.pts /         
+                                 clutch.qb.pts$pass.attempts, 3)
+
+# Adding League Average
+clutch.qb.pts[nrow(clutch.qb.pts)+1,"Passer"] <- "League Average"
+clutch.qb.pts[which(clutch.qb.pts$Passer == "League Average"),
+              "touchdown.count"] <- mean(clutch.qb.pts$touchdown.count, na.rm = TRUE)
+clutch.qb.pts[which(clutch.qb.pts$Passer == "League Average")
+              ,"pass.attempts"] <- mean(clutch.qb.pts$pass.attempts, na.rm = TRUE)
+clutch.qb.pts[which(clutch.qb.pts$Passer == "League Average"),
+              "rushTD.count"] <- round(mean(clutch.qb.pts$rushTD.count, na.rm = TRUE),3)
+clutch.qb.pts[which(clutch.qb.pts$Passer == "League Average"),
+              "rush.attempts"] <- round(mean(clutch.qb.pts$rush.attempts, na.rm = TRUE),3)
+clutch.qb.pts[which(clutch.qb.pts$Passer == "League Average"),
+              "total.tds"] <- round(mean(clutch.qb.pts$total.tds, na.rm = TRUE),3)
+clutch.qb.pts[which(clutch.qb.pts$Passer == "League Average"),
+              "total.pts"] <- round(mean(clutch.qb.pts$total.pts, na.rm = TRUE),0)
+clutch.qb.pts[which(clutch.qb.pts$Passer == "League Average"),
+              "pts.att"] <- round(mean(clutch.qb.pts$pts.att, na.rm = TRUE),3)
+
+# Ordering the DF
+clutch.qb.pts <- clutch.qb.pts[order(clutch.qb.pts$pts.att,
+                    decreasing = TRUE),]
+
+# Plotting
+
+plot.ptsperatt <- ggplot(clutch.qb.pts[c(1:15, 
+                                         which(clutch.qb.pts$Passer == "League Average")),],
+                         aes(x = reorder(Passer,                                                                        pts.att), y = pts.att)) +
+  geom_bar(stat = "identity", color = "navy", 
+           fill = c("red", rep("lightslateblue", 15)), 
+           alpha = .7,
+           show.legend = FALSE) +
+  theme(axis.text.y = element_text(size = 13)) +
+  ggtitle("Clutch Time Points per Attempt (2009-2015)") + coord_flip() +
+  ylab("Points per Attempt") + xlab("Passer") + 
+  geom_text(aes(label = pts.att), 
+                  nudge_y = .06)
+
+clutch.pts.tot <- clutch.qb.pts[order(clutch.qb.pts$total.pts,
+                    decreasing = TRUE),]
+
+plot.clutch.total <- ggplot(clutch.pts.tot[c(1:15, 
+                                         which(clutch.pts.tot$Passer == "League Average")),], 
+                            aes(x = reorder(Passer,                                                                        total.pts), y = total.pts)) +
+  geom_bar(stat = "identity", color = "navy", 
+           fill = c("red", rep("khaki1", 15)),
+           alpha = .75,
+           show.legend = FALSE) +
+  theme(axis.text.y = element_text(size = 13)) +
+  ggtitle("Clutch Time Total Points (2009-2015)") + coord_flip() +
+  ylab("Total Points") + xlab("Passer") + 
+  geom_text(aes(label = total.pts), 
+                  nudge_y = 5)
+
+grid.arrange(plot.ptsperatt, plot.clutch.total, ncol =1)
+```
+
+```{r, echo = FALSE}
+# Removing league average from points DF
+
+clutch.qb.pts <- clutch.qb.pts[-which(clutch.qb.pts$Passer == "League Average"),]
+```
+
+Overall, the three statistics I identified do a decent job of summarizing clutch quarterback play. Each statistic has its biases but when looking at them in conjunction they tell us a more detailed story.  But I wanted to take it a step further and try a more rigorous method to define clutchness.
+
+To better identify clutch quarterback play and clutch quarterbacks I tested a model based clustering method using the ```mclust``` R package (see [Fraley and Raftery 2002](https://www.stat.washington.edu/raftery/Research/PDF/fraley2002.pdf)).  Before starting, I added two more variables for each quarterback: 
+
+* Clutch First Downs: The number of first downs the quarterback threw or ran for in clutch time
+* Interception Rate: Interceptions per attempt
+
+The clustering method I used allowed me to group together the 76 quarterbacks in the sample.  The ``Mclust`` function allows you to specify a number of clusters to test, so I tested how the cluster assignments would work if I specified a range of two to ten groups.  The function then tests which number of groups maximizes BIC.  In our case, the number of groups was three, hence our clustering method grouped each quarterback into one of three groups (think elite, average, replacement level).
+
+The plot below allows visualization of 2-dimensional scatter-plots.  Each point represents a quarterback and the points are colored by the associated cluster.  If you study each of the scatter-plots, you can see that the different clusters are well grouped (in terms of distance) and have minimal between group overlap, which is ideal as it allows for easier separation of the clutch time statistics of each cluster.
+
+```{r, echo = FALSE, fig.height= 8.5, fig.width= 9.5}
+## Clustering - Model Based ##
+
+# Interception Per Attempt
+
+clutch.ints <- clutch.qbs %>% group_by(Passer) %>%summarise(
+               interceptions= sum(InterceptionThrown), 
+               pass.attempts = sum(PassAttempt))
+
+clutch.ints$intperatt <- round(clutch.ints$interceptions / 
+                                 clutch.ints$pass.attempts, 3)
+
+# First Downs
+
+# Passing
+clutch.fds.pas <- clutch.qbs %>% group_by(Passer) %>%summarise(
+                firstdowns = length(which(ydstogo < Yards.Gained)))
+
+# Rushing
+clutch.fds.rush <- clutch.qbs %>% group_by(Rusher) %>%summarise(
+                rush.firstdowns = length(which(ydstogo < Yards.Gained)))
+
+# Merging FD
+clutch.qb.fds <- merge(clutch.fds.pas, clutch.fds.rush, by.x = "Passer",
+                       by.y = "Rusher", all.x = TRUE)
+clutch.qb.fds$rush.firstdowns[is.na(clutch.qb.fds$rush.firstdowns)] <- 0
+
+clutch.qb.fds$TotalFDs <- clutch.qb.fds$firstdowns + clutch.qb.fds$rush.firstdowns
+
+### Now merge all datasets into one
+
+clust.df1 <- merge(clutch.passes, clutch.qb.fds, all.x = TRUE, by = "Passer")
+clust.df2 <- merge(clust.df1, clutch.ints, all.x = TRUE, by = "Passer")
+clust.df3 <- merge(clust.df2, clutch.qb.pts, all.x = TRUE, by = "Passer")
+
+clust.df.final <- clust.df3[-nrow(clust.df3), c("Passer", 
+                                                "comp.perc", 
+                                                "TotalFDs",
+                                                "intperatt", 
+                                                "pts.att", 
+                                                "total.pts")]
+
+## Let the clustering Begin!
+
+mod.clusters <- Mclust(clust.df.final[,-1], G = 2:10)
+#names(mod.clusters)
+#plot(mod.clusters)
+
+
+plot(mod.clusters, what = "classification", addEllipses = FALSE,
+     labels = c("Compl. Percentage", "Total First Downs",
+                "Interception Rate", "Points per Att",
+                "Total Points"), col = c("gold", "navy", "indianred1"))
+title("Pairs Plot of Quarterback Clutch Statistics colored by Model Based Cluster Group", line = 3)
+
+
+clust.df.final$cluster <- mod.clusters$classification
+
+clust.df.final.ord <- clust.df.final[order(clust.df.final$cluster),]
+```
+
+\pagebreak
+
+Below is a table of the different clusters, each with 7 of the member quarterbacks listed.  Even by looking at a sample of quarterbacks names from each cluster differences are evident.  Group 1 contains elite or Pro Bowl level quarterbacks, group 2 contains average starters, and group 3 contains backups or replacement level players.
+
+```{r, echo = FALSE}
+
+cluster.groups <- data.frame("Group 1" = clust.df.final.ord[1:7, "Passer"],
+                             "Group 2" = clust.df.final.ord[23:29, "Passer"],
+                             "Group 3" = clust.df.final.ord[59:65, "Passer"])
+kable(cluster.groups, colnames = c("Group 1", "Group 2", "Group 3"))
+```
+
+
+Summary statistics provide further insight into the differences between these groups.  Each statistic in the below table is an average of each of the different clusters.  Looking at total first downs and total points, we see that group 1 dominates the other two groups.  Group 1 also has the edge in regards to Completion Percentage and Points per Attempt.  
+
+The model based clustering algorithm method uses the five statistics I collected to group quarterbacks by their clutch play, and based on my knowledge of football it seemed to do a good job of assigning groups and separating the quarterbacks by general skill level and success.  Overall, I am happy with the results but some improvements can definitely be made.  Using expected points instead of points per attempt or total points would account for more of the point contribution for the quarterbacks ([Brian Burke](https://www.youtube.com/watch?v=IDLCulWNGyk)).  It would be nice if I had data going back earlier than 2009, as players such as Tom Brady and Brett Farve seem to be undervalued. That said, this is a good start, and it allows us to begin to visualize and define clutch quarterback play.
+
+```{r, echo = FALSE}
+
+clust.summary <- clust.df.final %>% group_by(cluster) %>% 
+  summarize_each(funs(mean), comp.perc, TotalFDs, intperatt,
+                                                   pts.att,
+                                                   total.pts)
+
+colnames(clust.summary) <- c("Cluster", "Compl. Percentage", "Total First Downs",
+                "Interception Rate", "Points per Att",
+                "Total Points")
+
+kable(round(clust.summary,3))
+```
+
+```{r, echo = FALSE, eval=FALSE}
+# Unused clustering stuff
+
+heirc.clusters <- hclust(dist(clust.df.final[,-1]))
+which(cutree(heirc.clusters, k = 3) == 3)
+
+kmeans.clust <- kmeans(clust.df.final[,-1], 3)
+
+wcc <- NULL
+for(i in 2:10){
+  wcc <- c(wcc,sum(kmeans(clust.df.final[,-1],i)$withinss))	
+}
+plot(seq(2,10),wcc,type="b",pch=16,xlab="Number of Clusters",ylab="Total Within Sum-of-Squares")
+
+plot(x = clust.df.final$comp.perc, 
+     y = clust.df.final$TotalFDs,
+     pch= clust.df.final$Passer ,    
+     xlab="comp.perc",ylab="TotalFDs",col=kmeans.clust$cluster,
+     cex = .6)
+
+plot(heirc.clusters, labels = clust.df.final[,1])
+
+clusters$BIC
+```
+
+The clustering model built above allowed me to group and identify quarterbacks based on five different "clutch" statistics.  With improvements aside (think cross-validation), my method here shows that "clutch" play is quantifiable. This is just one of the many incredible things that the `nflscrapR` package offers to the NFL analytics community!  Take this as an example and build on it!
+
+
+### Running Back Trends by Down and Quarter
+
+Another interesting area of research in the NFL is player trends in different game situations. I specifically wanted to look at running back trends, particularly because I am interested in knowing whether the increased reliance on passing in today's game is truly necessary or is a copycat effect.  
+
+Here, I focused on the Minnesota Viking and their star running back, Adrian Peterson.  I subsetted all the data from 2009-2015 to find all the plays where Peterson was the rusher and a play was actually executed (e.g. no penalty).  Then, for each down in each quarter, I estimated the distribution of his yards gained on each rush using kernel density estimation.  This allowed me to visualize at which points in the game Peterson was running his hardest or was at his best.  The below 16 graphs show each down and quarter combination, let's examine it a bit further:
+
+Looking at first and second down for quarters one through four, you can see that the distributions all have roughly the same shape: unimodal, centered around 4.5 yards with some right skew.  Peterson's rushes on first down tend to be longer on average, and he sees the highest average yards gained on first down in the fourth quarter.  His lowest average yards gained on first down is in the first quarter.  Logically, this makes sense as defenses expect more rushes on first down in the first quarter than they would in any other quarter. 
+
+On second down, we see that AP fairs well across all quarters and overtime (although overtime has many fewer data points).  Specifically, second down in the second quarter is where Peterson thrives.  He averages 5.33 yards per carry and as of last season has 23 rushes over 10 yards.  Just looking at the second column of graphs in our plot, we see how effective Peterson is on second down.  This is something to hold onto for later!
+
+On the whole, Peterson has fewer rush attempts on third down, which again makes sense.  According to the data collected from ```nflscrapR```, teams pass 52% on third down compared to running just 37% of the time (the remaining 11% is accounted for in punts, penalties, and field goals).  His average yards per carry on third down vary the most on third down.  He averages a whopping 8.58 yards per carry on third down in the second quarter, compared to just 2.62 yards per carry in the third (note the 8.58 yards per carry value is skewed by an 82 yard run that Peterson had on third down in the second quarter). The difference here may have to do with Peterson's opportunities.  In the second quarter, he may be running in a lot more hopeless third and long situation and gaining lots of yards while in the third quarter, he may be running on a lot more third and short situations trying to just get a first down.  Play sequencing may also come into effect which is something to look at in tandem with the graphs below.  For example, play sequencing could tell us that many of Peterson's third down runs in the third quarter are preceded by running plays, and thus the defense is expecting the Vikings to run again. 
+
+Fourth down is in its own category.  Since 2009, AP has just 13 carries on fourth down.  When he does run on fourth down, his team is often in fourth and short situations hence why the observed yards per carry values are small across quarters.  With such a small sample size, it's hard to drawn valid conclusions for runs on fourth down so let's move on.
+```{r, echo = FALSE}
+# Basic Plots
+# Adrian Peterson's Run Spread
+
+ap.rushes <- subset(total.dat, Rusher == "A.Peterson")
+
+### Across Downs and Quarter
+
+ap.rushes.narm <- ap.rushes[which(!is.na(ap.rushes$down)),]
+
+ap.rushes.narm$Quarter <- ap.rushes.narm$qtr
+ap.rushes.narm$Down <- ap.rushes.narm$down
+
+ap.summarized <- ap.rushes.narm %>% group_by(Quarter, Down) %>%
+                  summarize_each(funs(mean, max, min), matches("Yards.Gained"))
+
+# Quarter 2 down 2
+
+ap.q2.d2 <- subset(ap.rushes.narm, Quarter == 2 & Down == 2)
+runsover15 <-  length(which(ap.q2.d2$Yards.Gained >= 10))
+
+# Third down Pass Plays
+
+all.3d <- subset(total.dat, down = 3)
+all.3d <- all.3d[which(!is.na(all.3d$down)),]
+all.3d <- subset(all.3d, is.na(PenaltyType))
+
+#round(prop.table(table(all.3d$PlayType)), 2)
+
+# length(which(all.3d$PlayType == "Pass")) / nrow(all.3d)
+
+ap.yard.qrt.down <- ggplot(ap.rushes.narm, aes(x = Yards.Gained)) + ylim(0, .25) +
+    annotate(geom = "text", 
+             label = "Summary Statistics of \nDistribution",
+              x = 57, y = .23, size = 2.7, color = "navy") +
+  geom_density(alpha = .45,  fill = "darkturquoise") + geom_rug() + 
+  facet_grid(Quarter~Down, 
+             labeller = label_both)  + 
+  geom_text(aes(x = 57, y = .18, label= paste("Mean:", round(mean,2)), 
+                group=NULL),  size = 2.8, data=ap.summarized) +
+  geom_text(aes(x = 57, y = .15, label= paste("Min:", min), 
+                group=NULL),  size = 2.8, data=ap.summarized) +
+  geom_text(aes(x = 57, y = .12, label= paste("Max:", max), 
+                group=NULL),  size = 2.8, data=ap.summarized) +
+  ggtitle("Adrian Peterson Yards Gained by Down and Quarter") + xlab("Yards Gained on Rushes") + ylab("Density") +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r, dev='pdf', fig.height= 8.5, fig.width= 9.5, warning = FALSE, echo = FALSE}
+ap.yard.qrt.down
+```
+
+From my above inspection of Peterson's rushing trends by down and quarter, we could give some initial suggestions to the Minnesota Vikings on how to better use Peterson in game situations. Of course it is important to understand that listening to the following suggestions 100% of the time makes them useless so each one must be used by the coaching staff along with other game strategies:
+
+1. Limit the number of first down rushes in the first quarter.  Although this is a common trend, AP averages about 1 yard less per carry on first down in the first quarter than in any other quarter.
+2. Second down is where Peterson shines, especially in the second and fourth quarters.  I would recommend calling more running plays on second down in the fourth quarters to keep the defense off balance and honest against the run in the hope that it leads to more opportunities in the passing game.
+3. Use Peterson more on third downs in the first and fourth quarters.  He has a large enough sample size in both quarters to validate his yards per attempt values, both of which are greater than 4.  According to Football Outsiders, teams convert more third and short situations when running the football so I recommend that the Vikings utilize AP on third and short more often.  Again, running on third down will keep teams honest and could open up holes down field for the passing game off of play-action passes.
+
+
+## Wrapping Up Usage of ```nflscrapR```
+
+This article provides two detailed examples of how to use ``nflscrapR`` to dig through NFL data to find insights.  Here, I used the play-by-play functions to examine clutch quarterback play and running trends across down and quarter.  The ```nflscrapR``` package made data collection the easiest part of this project, allowing me to focus on the fun stuff: making graphs and building models!  With just a few ideas and some familiarity with R, I was able to gather insights that could be directly beneficial to NFL teams.
+
+Of course, there are many other functionalities of ```nflscrapR```, which I will leave up to all of you to explore on your own (I am working on improving the documentation, so bear with me for now).
+
+```nflscrapR``` brings the power of NFL analytics into the hands of interested and analytically minded fans as well as those pursuing careers in football.  Start making a name for yourself today by **downloading the package from GitHub** with the following R code. Enjoy!
+
+```{r, eval = FALSE}
+install.packages(devtools)
+library(devtools)
+
+devtools::install_github(repo = "maksimhorowitz/nflscrapR")
+```
+
+
+## Sources
+
+* https://github.com/maksimhorowitz/nflscrapR
+
+* http://www.pro-football-reference.com/play-index/comeback.cgi?player=LuckAn00
+
+* http://www.pro-football-reference.com/play-index/comeback.cgi?player=OrtoKy00
+
+* http://www.footballoutsiders.com/info/fo-basics
+
+* https://www.youtube.com/watch?v=IDLCulWNGyk
+
+* https://www.stat.washington.edu/raftery/Research/PDF/fraley2002.pdf
